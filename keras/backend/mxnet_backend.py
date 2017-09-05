@@ -79,7 +79,7 @@ def set_model(model):
 
 
 def clear_session():
-    reset_uids()
+    # reset_uids()
     _EXECUTOR = None
     _MODEL = None
     _REENTRY = False
@@ -205,6 +205,272 @@ TODO: Contexts are not yet supported with MXNet backend.
 class KerasContext(object):
     pass
 
+class KerasSymbol(object):
+    def __init__(self, symbol, name=None, neighbor=None, is_var=False):
+        if neighbor is None:
+            neighbor = []
+        if not isinstance(symbol, mx.symbol.Symbol):
+            raise TypeError
+        self._train_sym = symbol if learning_phase() or is_var else None
+        self._pred_sym = None if learning_phase() and not is_var else symbol
+        self._uses_learning_phase = False
+        self._name = name
+        self._neighbor = []
+        for n in neighbor:
+            self.add_neighbor(n)
+        self._bind_values = {}
+
+
+    def bind(self, data):
+        self.tensor = data
+        if self.name in self._bind_values:
+            assert self._bind_values[self.name].shape == data.shape, \
+                "Redefinition of variable %s" % self.name
+            assert self._bind_values[self.name].dtype == data.dtype, \
+                "Redefinition of variable %s" % self.name
+            if _MODEL is not None and self.name in _MODEL._args:
+                _MODEL._set_weights({self.name: data}, {})
+            if _MODEL is not None and self.name in _MODEL._auxs:
+                _MODEL._set_weights({}, {self.name: data})
+            else:
+                self._bind_values[self.name][:] = data
+        else:
+            self._bind_values[self.name] = data
+
+    def add_neighbor(self, x):
+        if isinstance(x, KerasSymbol):
+            if x not in self._neighbor:
+                self._neighbor.append(x)
+                x.add_neighbor(self)
+
+    def get_neighbor(self):
+        return self._neighbor
+
+    def get_bind_values(self):
+        return self._bind_values
+
+    @property
+    def symbol(self):
+        sym = self._train_sym if learning_phase() else self._pred_sym
+        assert sym is not None, "%s, %s"%(self._train_sym, self._pred_sym)
+        return sym
+
+    @property
+    def name(self):
+        if self._name is not None:
+            return self._name
+        else:
+            return self.symbol.name
+
+    @property
+    def dtype(self):
+        return self.get_type()
+
+    @property
+    def shape(self):
+        return self.get_shape()
+
+    def get_shape(self):
+        if hasattr(self, 'tensor'):
+            return self.tensor.shape
+        else:
+            _, out_shape, _ = self.symbol.infer_shape_partial()
+            return out_shape[0]
+
+    def get_type(self):
+        if hasattr(self, 'tensor'):
+            return _typename(self.tensor.dtype)
+        else:
+            _, out_type, _ = self.symbol.infer_type()
+            t = out_type[0]
+            return _typename(t)
+
+    @keras_symbol_child
+    def __getitem__(self, in_slice):
+        begin = []
+        end = []
+        for i in in_slice:
+            if isinstance(i, int):
+                begin.append(i)
+                end.append(i + 1)
+            else:
+                assert isinstance(i, slice)
+                assert i.step is None or i.step == 1
+                begin.append(i.start)
+                end.append(i.stop)
+        return KerasSymbol(mx.sym.slice(self.symbol, begin=tuple(begin), end=tuple(end)), neighbor=[self])
+
+    @keras_symbol_child
+    def __abs__(self):
+        return KerasSymbol(mx.sym.abs(self.symbol), neighbor=[self])
+
+    @keras_symbol_child
+    def __add__(self, other):
+        if isinstance(other, KerasSymbol):
+            return KerasSymbol(
+                mx.sym.broadcast_add(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+        else:
+            return KerasSymbol(
+                self.symbol + other)
+
+    @keras_symbol_child
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    @keras_symbol_child
+    def __sub__(self, other):
+        if isinstance(other, KerasSymbol):
+            return KerasSymbol(
+                mx.sym.broadcast_minus(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+        else:
+            return KerasSymbol(self.symbol - other)
+
+    @keras_symbol_child
+    def __rsub__(self, other):
+        return self.__neg__().__add__(other)
+
+    @keras_symbol_child
+    def __neg__(self):
+        return KerasSymbol(self.symbol * (-1.0), neighbor=[self])
+
+    @keras_symbol_child
+    def __div__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(
+                self.symbol / other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_div(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __truediv__(self, other):
+        return self.__div__(other)
+
+    @keras_symbol_child
+    def __itruediv__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(
+                self.symbol / other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_div(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __mul__(self, other):
+        if isinstance(other, KerasSymbol):
+            return KerasSymbol(
+                mx.sym.broadcast_mul(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+        else:
+            return KerasSymbol(self.symbol * other)
+
+    @keras_symbol_child
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    # def __eq__(self, other):
+    #     if isinstance(other, Number):
+    #         return KerasSymbol(self.symbol == other)
+    #     else:
+    #         return KerasSymbolCompare(
+    #             mx.sym.broadcast_equal(
+    #                 lhs=self.symbol,
+    #                 rhs=other.symbol), self, other)
+
+    @keras_symbol_child
+    def __gt__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(self.symbol > other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_greater(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __ge__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(self.symbol >= other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_greater_equal(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __lt__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(
+                self.symbol < other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_lesser(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __le__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(
+                self.symbol <= other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_lesser_equal(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __gt__(self, other):
+        if isinstance(other, Number):
+            return KerasSymbol(
+                self.symbol > other)
+        else:
+            return KerasSymbol(
+                mx.sym.broadcast_greater(
+                    lhs=self.symbol,
+                    rhs=other.symbol))
+
+    @keras_symbol_child
+    def __pow__(self, power, modulo=None):
+        return KerasSymbol(self.symbol.__pow__(power), neighbor=[self])
+
+    def __repr__(self):
+        return self.symbol.name + ':[tensor=' + str(hasattr(self, 'tensor')) + \
+            ' dtype=' + self.dtype + ']'
+
+    def __str__(self):
+        return "Symbol:" + self.symbol.name
+
+
+class KerasSymbolCompare(KerasSymbol):
+    def __init__(self, symbol, left, right):
+        super(KerasSymbolCompare, self).__init__(symbol)
+        self._left = left
+        self._right = right
+
+    def __bool__(self):
+        return self._left.name == self._right.name
+
+
+def KerasVariable(name, shape, dtype, **kwargs):
+    if dtype is None:
+        dtype = floatx()
+    v = mx.sym.Variable(name, shape=shape, dtype=dtype, **kwargs)
+    ret = KerasSymbol(v, is_var=True)
+    return ret
+
+def _autogen_name(prefix):
+    return prefix + str(get_uid(prefix))
+
 def variable(value, dtype=None, name=None, constraint=None):
     """Instantiates a variable and returns it.
 
@@ -232,7 +498,23 @@ def variable(value, dtype=None, name=None, constraint=None):
                [ 3.,  4.]])
     ```
     """
-    raise NotImplementedError()
+    if hasattr(value, 'tocoo'):
+        raise NotImplementedError("MXNet Backend do not support sparse tensors!")
+    if name is None:
+        name = _autogen_name('variable')
+    if dtype is None:
+        dtype = floatx()
+    dtype = np.dtype(dtype)
+    if isinstance(value, Number):
+        value = np.array([value])
+    ndarray = mx.nd.array(value, dtype=dtype)
+    ret = KerasVariable(name, ndarray.shape, ndarray.dtype)
+    ret.bind(ndarray)
+    if isinstance(value, np.ndarray):
+        ret._keras_shape = tuple([d if d != 0 else None for d in value.shape])
+    elif hasattr(value, 'get_shape'):
+        ret._keras_shape = tuple([d if d != 0 else None for d in map(int, value.get_shape())])
+    return ret
 
 def constant(value, dtype=None, shape=None, name=None):
     """Creates a constant tensor.
@@ -246,7 +528,27 @@ def constant(value, dtype=None, shape=None, name=None):
     # Returns
         A Constant Tensor.
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = np.dtype(dtype)
+
+    constant_tensor = None
+    if shape is None:
+        ndarray = mx.nd.array(value, dtype=dtype)
+        constant_tensor = KerasVariable(name, ndarray.shape, ndarray.dtype)
+        constant_tensor.bind(ndarray)
+    else:
+        np_ndarray = np.ndarray(shape, dtype=dtype)
+        np_ndarray.fill(value)
+        ndarray = mx.nd.array(np_ndarray)
+        constant_tensor = KerasVariable(name, ndarray.shape, ndarray.dtype)
+        constant_tensor.bind(ndarray)
+    if isinstance(value, np.ndarray):
+        constant_tensor._keras_shape = tuple([d if d != 0 else None for d in value.shape])
+    elif hasattr(value, 'get_shape'):
+        constant_tensor._keras_shape = tuple([d if d != 0 else None for d in map(int, value.get_shape())])
+    return constant_tensor
+
 
 
 def is_keras_tensor(x):
@@ -463,7 +765,24 @@ def eval(x):
                [ 3.,  4.]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        if hasattr(x, 'tensor'):
+            if x.name in x.get_bind_values() and _MODEL is not None:
+                _MODEL._sync_weights()
+            ret = x.tensor.asnumpy()
+        else:
+            bind_values = dfs_get_bind_values(x)
+            executor = x.symbol.simple_bind(mx.cpu(), grad_req='null')
+            for v in executor.arg_dict:
+                bind_values[v].copyto(executor.arg_dict[v])
+            outputs = executor.forward(is_train=_LEARNING_PHASE)
+            ret = outputs[0].asnumpy()
+
+        if ret.shape == (1,):
+            return ret[0]
+        return ret
+    else:
+        return x
 
 def zeros(shape, dtype=None, name=None):
     """Instantiates an all-zeros variable and returns it.
