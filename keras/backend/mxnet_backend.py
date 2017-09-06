@@ -1,11 +1,14 @@
 from __future__ import print_function
 import mxnet as mx
-from mxnet import nd as T
 import numpy as np
 
 from .common import _FLOATX, floatx, _EPSILON, image_dim_ordering, set_image_dim_ordering
 from numbers import Number
 from functools import wraps
+
+from collections import defaultdict
+
+_UID_PREFIXES = defaultdict(int)
 
 _LEARNING_PHASE = 1
 _EXECUTOR = None
@@ -14,6 +17,7 @@ _REENTRY = False
 
 placeholder_name_dict = dict()
 set_image_dim_ordering('th')
+
 
 def keras_symbol_child(func):
     @wraps(func)
@@ -279,11 +283,11 @@ class KerasSymbol(object):
 
     def get_type(self):
         if hasattr(self, 'tensor'):
-            return _typename(self.tensor.dtype)
+            return _convert_dtype_string(self.tensor.dtype)
         else:
             _, out_type, _ = self.symbol.infer_type()
             t = out_type[0]
-            return _typename(t)
+            return _convert_dtype_string(t)
 
     @keras_symbol_child
     def __getitem__(self, in_slice):
@@ -468,8 +472,10 @@ def KerasVariable(name, shape, dtype, **kwargs):
     ret = KerasSymbol(v, is_var=True)
     return ret
 
+
 def _autogen_name(prefix):
     return prefix + str(get_uid(prefix))
+
 
 def variable(value, dtype=None, name=None, constraint=None):
     """Instantiates a variable and returns it.
@@ -516,6 +522,7 @@ def variable(value, dtype=None, name=None, constraint=None):
         ret._keras_shape = tuple([d if d != 0 else None for d in map(int, value.get_shape())])
     return ret
 
+
 def constant(value, dtype=None, shape=None, name=None):
     """Creates a constant tensor.
 
@@ -548,7 +555,6 @@ def constant(value, dtype=None, shape=None, name=None):
     elif hasattr(value, 'get_shape'):
         constant_tensor._keras_shape = tuple([d if d != 0 else None for d in map(int, value.get_shape())])
     return constant_tensor
-
 
 
 def is_keras_tensor(x):
@@ -590,7 +596,8 @@ def is_keras_tensor(x):
         True
     ```
     """
-    raise NotImplementedError()
+    return hasattr(x, '_keras_history')
+
 
 def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
     """Instantiates a placeholder tensor and returns it.
@@ -615,10 +622,31 @@ def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
         >>> input_ph._keras_shape
         (2, 4, 5)
         >>> input_ph
-        <tf.Tensor 'Placeholder_4:0' shape=(2, 4, 5) dtype=float32>
+        placeholder1:[tensor=False dtype=float32]
     ```
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = np.dtype(dtype)
+    if name is None:
+        name = _autogen_name('placeholder')
+    elif name in placeholder_name_dict:
+        placeholder_name_dict[name] += 1
+        name = name + '_' + str(placeholder_name_dict[name] - 1)
+        placeholder_name_dict[name] = 1 if name not in placeholder_name_dict \
+                                        else placeholder_name_dict[name] + 1
+    else:
+        placeholder_name_dict[name] = 1
+    if not shape:
+        if ndim:
+            shape = tuple([0 for _ in range(ndim)])
+    else:
+        shape = tuple([0 if x is None else x for x in shape])
+    sym = KerasVariable(name, shape=shape, dtype=dtype)
+    sym._keras_shape = tuple([d if d != 0 else None for d in shape])
+    sym._mxnet_placeholder = True
+    return sym
+
 
 def is_placeholder(x):
     """Returns whether `x` is a placeholder.
@@ -628,11 +656,17 @@ def is_placeholder(x):
 
     # Returns
         Boolean.
+
+    # Examples
+    ```python
+        >>> from keras import backend as K
+        >>> input_ph = K.placeholder(shape=(2,4,5))
+        >>> K.is_placeholder(input_ph)
+        True
+    ```
     """
-    try:
-        return x.op.type == 'Placeholder'
-    except AttributeError:
-        return False
+    return hasattr(x, '_mxnet_placeholder') and x._mxnet_placeholder
+
 
 def shape(x):
     """Returns the symbolic shape of a tensor or variable.
@@ -771,7 +805,7 @@ def eval(x):
                 _MODEL._sync_weights()
             ret = x.tensor.asnumpy()
         else:
-            bind_values = dfs_get_bind_values(x)
+            bind_values = __dfs_get_bind_values(x)
             executor = x.symbol.simple_bind(mx.cpu(), grad_req='null')
             for v in executor.arg_dict:
                 bind_values[v].copyto(executor.arg_dict[v])
@@ -2759,3 +2793,53 @@ def local_conv2d(inputs, kernel, kernel_size, strides, output_shape, data_format
                     `channels_last` or `channels_first`.
     """
     raise NotImplementedError()
+
+
+# Other Common Utilities
+def get_uid(prefix=''):
+    """Provides a unique UID given a string prefix.
+
+    # Arguments
+        prefix: string.
+
+    # Returns
+        An integer.
+
+    # Example
+    ```
+        >>> keras.backend.get_uid('dense')
+        >>> 1
+        >>> keras.backend.get_uid('dense')
+        >>> 2
+    ```
+
+    """
+    _UID_PREFIXES[prefix] += 1
+    return _UID_PREFIXES[prefix]
+
+
+def reset_uids():
+    global _UID_PREFIXES
+    _UID_PREFIXES = defaultdict(int)
+
+
+# Internal utility functions
+def __dfs_get_bind_values(node_start):
+    stack_list = []
+    visited = set()
+    stack_list.append(node_start)
+    while len(stack_list) > 0:
+        cur_node = stack_list.pop()
+        if cur_node in visited:
+            continue
+        visited.add(cur_node)
+        next_nodes = cur_node.get_neighbor()
+        for i in next_nodes:
+            if i in visited:
+                continue
+            else:
+                stack_list.append(i)
+    bind_values = {}
+    for key in visited:
+        bind_values.update(key.get_bind_values())
+    return bind_values
