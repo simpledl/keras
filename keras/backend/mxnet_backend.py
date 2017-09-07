@@ -77,13 +77,14 @@ def keras_symbol_child(func):
                 _REENTRY = False
     return func_wrapper
 
+
 def set_model(model):
     global _MODEL
     _MODEL = model
 
 
 def clear_session():
-    # reset_uids()
+    reset_uids()
     _EXECUTOR = None
     _MODEL = None
     _REENTRY = False
@@ -102,6 +103,7 @@ def set_learning_phase(value):
     _LEARNING_PHASE = value
 
 
+# VARIABLE MANIPULATION
 def cast_to_floatx(x):
     """Cast a Numpy array to the default Keras float type.
 
@@ -133,51 +135,12 @@ def cast_to_floatx(x):
         return x.tolist()
 
 
-def _convert_dtype_string(dtype):
-    if dtype == np.float16:
-        return 'float16'
-    elif dtype == np.float32:
-        return 'float32'
-    elif dtype == np.float64:
-        return 'float64'
-    elif dtype == np.uint8:
-        return 'uint8'
-    elif dtype == np.uint16:
-        return 'uint16'
-    elif dtype == np.int16:
-        return 'int16'
-    elif dtype == np.int32:
-        return 'int32'
-    elif dtype == np.int64:
-        return 'int64'
-    else:
-        raise ValueError('MXNet Backend: Unsupported dtype: %s.' % dtype)
-
-def _convert_string_dtype(dtype):
-    if dtype == 'float16':
-        return np.float16
-    elif dtype == 'float32':
-        return np.float32
-    elif dtype == 'float64':
-        return np.float64
-    elif dtype == 'uint8':
-        return np.uint8
-    elif dtype == 'uint16':
-        return np.uint16
-    elif dtype == 'int16':
-        return np.int16
-    elif dtype == 'int32':
-        return np.int32
-    elif dtype == 'int64':
-        return np.int64
-    else:
-        raise ValueError('MXNet Backend: Unsupported dtype: %s.' % dtype)
-
-"""
-MXNet backend do not yet support sparse tensor operations.
-"""
 def is_sparse(tensor):
+    """
+    MXNet backend do not yet support sparse tensor operations.
+    """
     return False
+
 
 @keras_symbol_child
 def to_dense(tensor):
@@ -203,11 +166,13 @@ def to_dense(tensor):
     """
     raise NotImplementedError("MXNet Backend: Sparse operations are not supported.")
 
-"""
-TODO: Contexts are not yet supported with MXNet backend.
-"""
+
 class KerasContext(object):
+    """
+    TODO: Contexts are not yet supported with MXNet backend.
+    """
     pass
+
 
 class KerasSymbol(object):
     def __init__(self, symbol, name=None, neighbor=None, is_var=False):
@@ -223,7 +188,8 @@ class KerasSymbol(object):
         for n in neighbor:
             self.add_neighbor(n)
         self._bind_values = {}
-
+        # This will be MXNet NDArray
+        self.tensor = None
 
     def bind(self, data):
         self.tensor = data
@@ -465,18 +431,6 @@ class KerasSymbolCompare(KerasSymbol):
         return self._left.name == self._right.name
 
 
-def KerasVariable(name, shape, dtype, **kwargs):
-    if dtype is None:
-        dtype = floatx()
-    v = mx.sym.Variable(name, shape=shape, dtype=dtype, **kwargs)
-    ret = KerasSymbol(v, is_var=True)
-    return ret
-
-
-def _autogen_name(prefix):
-    return prefix + str(get_uid(prefix))
-
-
 def variable(value, dtype=None, name=None, constraint=None):
     """Instantiates a variable and returns it.
 
@@ -510,11 +464,11 @@ def variable(value, dtype=None, name=None, constraint=None):
         name = _autogen_name('variable')
     if dtype is None:
         dtype = floatx()
-    dtype = np.dtype(dtype)
+    dtype = _convert_string_dtype(dtype)
     if isinstance(value, Number):
         value = np.array([value])
     ndarray = mx.nd.array(value, dtype=dtype)
-    ret = KerasVariable(name, ndarray.shape, ndarray.dtype)
+    ret = _keras_variable(name, ndarray.shape, ndarray.dtype)
     ret.bind(ndarray)
     if isinstance(value, np.ndarray):
         ret._keras_shape = tuple([d if d != 0 else None for d in value.shape])
@@ -537,18 +491,18 @@ def constant(value, dtype=None, shape=None, name=None):
     """
     if dtype is None:
         dtype = floatx()
-    dtype = np.dtype(dtype)
+    dtype = _convert_string_dtype(dtype)
 
     constant_tensor = None
     if shape is None:
         ndarray = mx.nd.array(value, dtype=dtype)
-        constant_tensor = KerasVariable(name, ndarray.shape, ndarray.dtype)
+        constant_tensor = _keras_variable(name, ndarray.shape, ndarray.dtype)
         constant_tensor.bind(ndarray)
     else:
         np_ndarray = np.ndarray(shape, dtype=dtype)
         np_ndarray.fill(value)
         ndarray = mx.nd.array(np_ndarray)
-        constant_tensor = KerasVariable(name, ndarray.shape, ndarray.dtype)
+        constant_tensor = _keras_variable(name, ndarray.shape, ndarray.dtype)
         constant_tensor.bind(ndarray)
     if isinstance(value, np.ndarray):
         constant_tensor._keras_shape = tuple([d if d != 0 else None for d in value.shape])
@@ -627,7 +581,7 @@ def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
     """
     if dtype is None:
         dtype = floatx()
-    dtype = np.dtype(dtype)
+    dtype = _convert_string_dtype(dtype)
     if name is None:
         name = _autogen_name('placeholder')
     elif name in placeholder_name_dict:
@@ -642,7 +596,7 @@ def placeholder(shape=None, ndim=None, dtype=None, sparse=False, name=None):
             shape = tuple([0 for _ in range(ndim)])
     else:
         shape = tuple([0 if x is None else x for x in shape])
-    sym = KerasVariable(name, shape=shape, dtype=dtype)
+    sym = _keras_variable(name, shape=shape, dtype=dtype)
     sym._keras_shape = tuple([d if d != 0 else None for d in shape])
     sym._mxnet_placeholder = True
     return sym
@@ -679,24 +633,21 @@ def shape(x):
 
     # Examples
     ```python
-        # TensorFlow example
         >>> from keras import backend as K
-        >>> tf_session = K.get_session()
         >>> val = np.array([[1, 2], [3, 4]])
         >>> kvar = K.variable(value=val)
-        >>> inputs = keras.backend.placeholder(shape=(2, 4, 5))
+        >>> inputs = K.placeholder(shape=(2, 4, 5))
         >>> K.shape(kvar)
-        <tf.Tensor 'Shape_8:0' shape=(2,) dtype=int32>
+        (2,3)
         >>> K.shape(inputs)
-        <tf.Tensor 'Shape_9:0' shape=(3,) dtype=int32>
-        # To get integer shape (Instead, you can use K.int_shape(x))
-        >>> K.shape(kvar).eval(session=tf_session)
-        array([2, 2], dtype=int32)
-        >>> K.shape(inputs).eval(session=tf_session)
-        array([2, 4, 5], dtype=int32)
+        (2,4,5)
     ```
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        return x.get_shape()
+    else:
+        return None
+
 
 def int_shape(x):
     """Returns the shape tensor or variable as a tuple of int or None entries.
@@ -726,6 +677,7 @@ def int_shape(x):
     except ValueError:
         return None
 
+
 def ndim(x):
     """Returns the number of axes in a tensor, as an integer.
 
@@ -747,10 +699,11 @@ def ndim(x):
         2
     ```
     """
-    dims = x.get_shape()._dims
-    if dims is not None:
-        return len(dims)
+    shape = x.get_shape()
+    if shape is not None:
+        return len(shape)
     return None
+
 
 def dtype(x):
     """Returns the dtype of a Keras tensor or variable, as a string.
@@ -773,13 +726,14 @@ def dtype(x):
         # Keras variable
         >>> kvar = K.variable(np.array([[1, 2], [3, 4]]))
         >>> K.dtype(kvar)
-        'float32_ref'
+        'float32'
         >>> kvar = K.variable(np.array([[1, 2], [3, 4]]), dtype='float32')
         >>> K.dtype(kvar)
-        'float32_ref'
+        'float32'
     ```
     """
-    raise NotImplementedError()
+    return x.dtype
+
 
 def eval(x):
     """Evaluates the value of a variable.
@@ -805,7 +759,7 @@ def eval(x):
                 _MODEL._sync_weights()
             ret = x.tensor.asnumpy()
         else:
-            bind_values = __dfs_get_bind_values(x)
+            bind_values = _dfs_get_bind_values(x)
             executor = x.symbol.simple_bind(mx.cpu(), grad_req='null')
             for v in executor.arg_dict:
                 bind_values[v].copyto(executor.arg_dict[v])
@@ -817,6 +771,7 @@ def eval(x):
         return ret
     else:
         return x
+
 
 def zeros(shape, dtype=None, name=None):
     """Instantiates an all-zeros variable and returns it.
@@ -839,7 +794,16 @@ def zeros(shape, dtype=None, name=None):
                [ 0.,  0.,  0.,  0.]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = _convert_string_dtype(dtype)
+    value = mx.nd.zeros(shape, dtype=dtype)
+    if name is None:
+        name = _autogen_name('zerosinit')
+    kvar = _keras_variable(name, value.shape, value.dtype)
+    kvar.bind(value)
+    return kvar
+
 
 def ones(shape, dtype=None, name=None):
     """Instantiates an all-ones tensor variable and returns it.
@@ -862,7 +826,16 @@ def ones(shape, dtype=None, name=None):
                [ 1.,  1.,  1.,  1.]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = _convert_string_dtype(dtype)
+    value = mx.nd.ones(shape, dtype=dtype)
+    if name is None:
+        name = _autogen_name('onesinit')
+    kvar = _keras_variable(name=name, shape=shape, dtype=dtype)
+    kvar.bind(value)
+    return kvar
+
 
 def eye(size, dtype=None, name=None):
     """Instantiate an identity matrix and returns it.
@@ -886,7 +859,16 @@ def eye(size, dtype=None, name=None):
     ```
 
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = _convert_string_dtype(dtype)
+    value = mx.nd.array(np.eye(size, dtype=dtype))
+    if name is None:
+        name = _autogen_name('eyeinit')
+    kvar = _keras_variable(name=name, shape=size, dtype=dtype)
+    kvar.bind(value)
+    return kvar
+
 
 def zeros_like(x, dtype=None, name=None):
     """Instantiates an all-zeros variable of the same shape as another tensor.
@@ -910,7 +892,16 @@ def zeros_like(x, dtype=None, name=None):
                [ 0.,  0.,  0.]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if name is None:
+        name = _autogen_name('zeroslikeinit')
+    if dtype is None:
+        dtype = x.dtype
+    else:
+        dtype = _convert_string_dtype(dtype)
+
+    y = mx.symbol._internal._zeros(dtype=dtype)
+    return KerasSymbol(mx.symbol._internal._identity_with_attr_like_rhs(y, x.symbol), name=name, is_var=True)
+
 
 def ones_like(x, dtype=None, name=None):
     """Instantiates an all-ones variable of the same shape as another tensor.
@@ -934,7 +925,17 @@ def ones_like(x, dtype=None, name=None):
                [ 1.,  1.,  1.]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if name is None:
+        name = _autogen_name('oneslikeinit')
+    if dtype is None:
+        dtype = x.dtype
+    else:
+        dtype = _convert_string_dtype(dtype)
+
+    y = mx.symbol._internal._ones(dtype=dtype(x))
+
+    return KerasSymbol(mx.symbol._internal._identity_with_attr_like_rhs(y, x.symbol), name=name, is_var=True)
+
 
 def identity(x):
     """Returns a tensor with the same content as the input tensor.
@@ -946,6 +947,7 @@ def identity(x):
         A tensor of the same shape, type and content.
     """
     raise NotImplementedError()
+
 
 def random_uniform_variable(shape, low, high, dtype=None,
                             name=None, seed=None):
@@ -967,13 +969,25 @@ def random_uniform_variable(shape, low, high, dtype=None,
         # TensorFlow example
         >>> kvar = K.random_uniform_variable((2,3), 0, 1)
         >>> kvar
-        <tensorflow.python.ops.variables.Variable object at 0x10ab40b10>
+        randomuniform1:[tensor=True dtype=float32]
         >>> K.eval(kvar)
         array([[ 0.10940075,  0.10047495,  0.476143  ],
                [ 0.66137183,  0.00869417,  0.89220798]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = _convert_string_dtype(dtype)
+    if name is None:
+        name = _autogen_name("randomuniform")
+    value = mx.random.uniform(low=low, high=high, dtype='float32', shape=shape)
+    if dtype != np.float32:
+        value = mx.nd.Cast(value, dtype=dtype)
+
+    kvar = _keras_variable(name=name, shape=shape, dtype=dtype)
+    kvar.bind(value)
+    return kvar
+
 
 def random_normal_variable(shape, mean, scale, dtype=None,
                            name=None, seed=None):
@@ -1025,6 +1039,8 @@ def count_params(x):
     shape = x.get_shape()
     return np.prod([shape[i]._value for i in range(len(shape))])
 
+
+@keras_symbol_child
 def cast(x, dtype):
     """Casts a tensor to a different dtype and returns it.
 
@@ -2824,7 +2840,19 @@ def reset_uids():
 
 
 # Internal utility functions
-def __dfs_get_bind_values(node_start):
+def _keras_variable(name, shape, dtype, **kwargs):
+    if dtype is None:
+        dtype = floatx()
+    v = mx.sym.Variable(name, shape=shape, dtype=dtype, **kwargs)
+    ret = KerasSymbol(v, is_var=True)
+    return ret
+
+
+def _autogen_name(prefix):
+    return prefix + str(get_uid(prefix))
+
+
+def _dfs_get_bind_values(node_start):
     stack_list = []
     visited = set()
     stack_list.append(node_start)
@@ -2843,3 +2871,55 @@ def __dfs_get_bind_values(node_start):
     for key in visited:
         bind_values.update(key.get_bind_values())
     return bind_values
+
+
+def _convert_string_dtype(dtype):
+    """Get the type from a string.
+
+    # Arguments
+        dtype: A string representation of a type.
+
+    # Returns
+        The type requested.
+
+    # Raises
+        ValueError: if `dtype` is not supported.
+    """
+    mapping = {'float16': np.float16,
+               'float32': np.float32,
+               'float64': np.float64,
+               'int16': np.int16,
+               'int32': np.int32,
+               'int64': np.int64,
+               'uint8': np.int8,
+               'uint16': np.uint16}
+
+    if dtype not in mapping:
+        raise ValueError('MXNet Backend: Unsupported dtype:', dtype)
+    return mapping[dtype]
+
+
+def _convert_dtype_string(dtype):
+    """Get the String from type.
+
+    # Arguments
+        dtype: Type.
+
+    # Returns
+       A stromg representation of a type.
+
+    # Raises
+        ValueError: if `dtype` is not supported.
+    """
+    mapping = {np.float16: 'float16',
+               np.float32: 'float32',
+               np.float64: 'float64',
+               np.int16: 'int16',
+               np.int32: 'int32',
+               np.int64: 'int64',
+               np.int8: 'uint8',
+               np.uint16: 'uint16'}
+
+    if dtype not in mapping:
+        raise ValueError('MXNet Backend: Unsupported dtype:', dtype)
+    return mapping[dtype]
