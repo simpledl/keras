@@ -898,9 +898,10 @@ def zeros_like(x, dtype=None, name=None):
         dtype = x.dtype
     else:
         dtype = _convert_string_dtype(dtype)
-
-    y = mx.symbol._internal._zeros(dtype=dtype)
-    return KerasSymbol(mx.symbol._internal._identity_with_attr_like_rhs(y, x.symbol), name=name, is_var=True)
+    value = mx.nd.zeros(x.shape, dtype=dtype)
+    kvar = _keras_variable(name=name, dtype=dtype, shape=x.shape)
+    kvar.bind(value)
+    return kvar
 
 
 def ones_like(x, dtype=None, name=None):
@@ -932,9 +933,10 @@ def ones_like(x, dtype=None, name=None):
     else:
         dtype = _convert_string_dtype(dtype)
 
-    y = mx.symbol._internal._ones(dtype=dtype(x))
-
-    return KerasSymbol(mx.symbol._internal._identity_with_attr_like_rhs(y, x.symbol), name=name, is_var=True)
+    value = mx.nd.ones(shape=x.get_shape(), dtype=dtype)
+    kvar = _keras_variable(name=name, dtype=dtype, shape=x.shape)
+    kvar.bind(value)
+    return kvar
 
 
 def identity(x):
@@ -945,8 +947,28 @@ def identity(x):
 
     # Returns
         A tensor of the same shape, type and content.
+
+    # Examples
+    ```python
+        >>> from keras import backend as K
+        >>> kvar = K.variable(np.array([[1, 2], [3, 4]]), dtype='float32')
+        >>> kvar_copy = K.identity(kvar)
+        >>> K.eval(kvar)
+        array([[ 1.,  2.],
+               [ 3.,  4.]], dtype=float32)
+        >>> K.eval(kvar_copy)
+        array([[ 1.,  2.],
+               [ 3.,  4.]], dtype=float32)
+    ```
     """
-    raise NotImplementedError()
+    name = _autogen_name('identityinit')
+    dtype = x.dtype
+    shape = x.shape
+    xvalue = eval(x)
+    value = mx.nd.array(xvalue, dtype=dtype)
+    kvar = _keras_variable(name=name, dtype=dtype, shape=shape)
+    kvar.bind(value)
+    return kvar
 
 
 def random_uniform_variable(shape, low, high, dtype=None,
@@ -966,13 +988,21 @@ def random_uniform_variable(shape, low, high, dtype=None,
 
     # Example
     ```python
-        # TensorFlow example
-        >>> kvar = K.random_uniform_variable((2,3), 0, 1)
-        >>> kvar
-        randomuniform1:[tensor=True dtype=float32]
-        >>> K.eval(kvar)
-        array([[ 0.10940075,  0.10047495,  0.476143  ],
-               [ 0.66137183,  0.00869417,  0.89220798]], dtype=float32)
+        >>> rand_var = K.random_uniform_variable(shape=(3,3), low=1, high=3)
+        >>> K.eval(rand_var)
+        array([[ 2.09762716,  2.18568921,  2.43037868],
+               [ 2.6885314 ,  2.20552683,  2.71589136],
+               [ 2.0897665 ,  2.69450331,  1.84730959]], dtype=float32)
+        >>> rand_var1 = K.random_uniform_variable(shape=(3,3), low=1, high=3, seed=128)
+        >>> K.eval(rand_var1)
+        array([[ 1.07625926,  1.60461187,  1.30567968],
+               [ 2.43757105,  2.77134657,  2.16382241],
+               [ 1.7636764 ,  2.51851654,  1.96760654]], dtype=float32)
+        >>> rand_var2 = K.random_uniform_variable(shape=(3,3), low=1, high=3, seed=128)
+        >>> K.eval(rand_var2)
+        array([[ 1.07625926,  1.60461187,  1.30567968],
+               [ 2.43757105,  2.77134657,  2.16382241],
+               [ 1.7636764 ,  2.51851654,  1.96760654]], dtype=float32)
     ```
     """
     if dtype is None:
@@ -980,6 +1010,8 @@ def random_uniform_variable(shape, low, high, dtype=None,
     dtype = _convert_string_dtype(dtype)
     if name is None:
         name = _autogen_name("randomuniform")
+    if seed:
+        mx.random.seed(seed)
     value = mx.random.uniform(low=low, high=high, dtype='float32', shape=shape)
     if dtype != np.float32:
         value = mx.nd.Cast(value, dtype=dtype)
