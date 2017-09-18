@@ -241,14 +241,16 @@ class KerasSymbol(object):
         return self.get_shape()
 
     def get_shape(self):
-        if hasattr(self, 'tensor'):
+        if hasattr(self, 'tensor') and self.tensor:
+            print("HIIO")
+            print(self.tensor)
             return self.tensor.shape
         else:
             _, out_shape, _ = self.symbol.infer_shape_partial()
             return out_shape[0]
 
     def get_type(self):
-        if hasattr(self, 'tensor'):
+        if hasattr(self, 'tensor') and self.tensor:
             return _convert_dtype_string(self.tensor.dtype)
         else:
             _, out_type, _ = self.symbol.infer_type()
@@ -994,11 +996,11 @@ def random_uniform_variable(shape, low, high, dtype=None,
                [ 2.6885314 ,  2.20552683,  2.71589136],
                [ 2.0897665 ,  2.69450331,  1.84730959]], dtype=float32)
         >>> rand_var1 = K.random_uniform_variable(shape=(3,3), low=1, high=3, seed=128)
+        >>> rand_var2 = K.random_uniform_variable(shape=(3,3), low=1, high=3, seed=128)
         >>> K.eval(rand_var1)
         array([[ 1.07625926,  1.60461187,  1.30567968],
                [ 2.43757105,  2.77134657,  2.16382241],
                [ 1.7636764 ,  2.51851654,  1.96760654]], dtype=float32)
-        >>> rand_var2 = K.random_uniform_variable(shape=(3,3), low=1, high=3, seed=128)
         >>> K.eval(rand_var2)
         array([[ 1.07625926,  1.60461187,  1.30567968],
                [ 2.43757105,  2.77134657,  2.16382241],
@@ -1038,16 +1040,37 @@ def random_normal_variable(shape, mean, scale, dtype=None,
 
     # Example
     ```python
-        # TensorFlow example
-        >>> kvar = K.random_normal_variable((2,3), 0, 1)
-        >>> kvar
-        <tensorflow.python.ops.variables.Variable object at 0x10ab12dd0>
-        >>> K.eval(kvar)
-        array([[ 1.19591331,  0.68685907, -0.63814116],
-               [ 0.92629528,  0.28055015,  1.70484698]], dtype=float32)
+        >>> rand_var = K.random_normal_variable(shape=(3,3), mean=0, scale=1)
+        >>> K.eval(rand_var)
+        array([[ 1.16307867,  2.21220636,  0.48380461],
+               [ 0.7740038 ,  0.29956347,  1.04344034],
+               [ 0.15302546,  1.18392551, -1.16881478]], dtype=float32)
+        >>> rand_var1 = K.random_normal_variable(shape=(3,3), mean=0, scale=1, seed=128)
+        >>> rand_var2 = K.random_normal_variable(shape=(3,3), mean=0, scale=1, seed=128)
+        >>> K.eval(rand_var1)
+        array([[-0.75213492,  0.47400656,  0.95352972],
+               [ 0.20251541, -0.62203991,  1.36481571],
+               [-0.08511394, -1.4962182 , -0.20014545]], dtype=float32)
+        >>> K.eval(rand_var2)
+        array([[-0.75213492,  0.47400656,  0.95352972],
+               [ 0.20251541, -0.62203991,  1.36481571],
+               [-0.08511394, -1.4962182 , -0.20014545]], dtype=float32)
     ```
     """
-    raise NotImplementedError()
+    if dtype is None:
+        dtype = floatx()
+    dtype = _convert_string_dtype(dtype)
+    if name is None:
+        name = _autogen_name("randomnormal")
+    if seed:
+        mx.random.seed(seed)
+    value = mx.random.normal(loc=mean, scale=scale, dtype='float32', shape=shape)
+    if dtype != np.float32:
+        value = mx.nd.Cast(value, dtype=dtype)
+    kvar = _keras_variable(name=name, shape=shape, dtype=dtype)
+    kvar.bind(value)
+    return kvar
+
 
 def count_params(x):
     """Returns the number of scalars in a Keras variable.
@@ -1069,7 +1092,7 @@ def count_params(x):
     ```
     """
     shape = x.get_shape()
-    return np.prod([shape[i]._value for i in range(len(shape))])
+    return np.prod([shape[i] for i in range(len(shape))])
 
 
 @keras_symbol_child
@@ -1090,19 +1113,23 @@ def cast(x, dtype):
         >>> from keras import backend as K
         >>> input = K.placeholder((2, 3), dtype='float32')
         >>> input
-        <tf.Tensor 'Placeholder_2:0' shape=(2, 3) dtype=float32>
+        placeholder1:[tensor=True dtype=float32]
         # It doesn't work in-place as below.
         >>> K.cast(input, dtype='float16')
-        <tf.Tensor 'Cast_1:0' shape=(2, 3) dtype=float16>
+        cast0:[tensor=True dtype=float16]
         >>> input
-        <tf.Tensor 'Placeholder_2:0' shape=(2, 3) dtype=float32>
+        placeholder1:[tensor=True dtype=float32]
         # you need to assign it.
         >>> input = K.cast(input, dtype='float16')
         >>> input
-        <tf.Tensor 'Cast_2:0' shape=(2, 3) dtype=float16>
+        cast2:[tensor=True dtype=float16]
     ```
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        return KerasSymbol(
+            mx.sym.Cast(data=x.symbol, dtype=dtype))
+    else:
+        return x.astype(dtype)
 
 # UPDATES OPS
 
@@ -1117,7 +1144,8 @@ def update(x, new_x):
     # Returns
         The variable `x` updated.
     """
-    raise NotImplementedError()
+    raise NotImplementedError('MXNet Backend: Update operations are not supported')
+
 
 def update_add(x, increment):
     """Update the value of `x` by adding `increment`.
@@ -1129,7 +1157,8 @@ def update_add(x, increment):
     # Returns
         The variable `x` updated.
     """
-    raise NotImplementedError()
+    raise NotImplementedError('MXNet Backend: Update operations are not supported')
+
 
 def update_sub(x, decrement):
     """Update the value of `x` by subtracting `decrement`.
@@ -1141,7 +1170,8 @@ def update_sub(x, decrement):
     # Returns
         The variable `x` updated.
     """
-    raise NotImplementedError()
+    raise NotImplementedError('MXNet Backend: Update operations are not supported')
+
 
 def moving_average_update(x, value, momentum):
     """Compute the moving average of a variable.
@@ -1154,10 +1184,11 @@ def moving_average_update(x, value, momentum):
     # Returns
         An operation to update the variable.
     """
-    raise NotImplementedError()
+    raise NotImplementedError('MXNet Backend: Update operations are not supported')
+
 
 # LINEAR ALGEBRA
-
+@keras_symbol_child
 def dot(x, y):
     """Multiplies 2 tensors (and/or variables) and returns a *tensor*.
 
@@ -1179,7 +1210,9 @@ def dot(x, y):
         >>> y = K.placeholder(shape=(3, 4))
         >>> xy = K.dot(x, y)
         >>> xy
-        <tf.Tensor 'MatMul_9:0' shape=(2, 4) dtype=float32>
+        dot0:[tensor=True dtype=float32]
+        >>> xy.shape
+        (2, 4)
     ```
 
     ```python
@@ -1188,7 +1221,9 @@ def dot(x, y):
         >>> y = K.placeholder(shape=(3, 4))
         >>> xy = K.dot(x, y)
         >>> xy
-        <tf.Tensor 'MatMul_9:0' shape=(32, 28, 4) dtype=float32>
+        dot0:[tensor=True dtype=float32]
+        >>> xy.shape
+        (32, 28, 4)
     ```
 
     ```python
@@ -1200,8 +1235,17 @@ def dot(x, y):
         (2, 4, 5)
     ```
     """
-    raise NotImplementedError()
+    if ndim(y) > 2:
+        axis = list(range(ndim(y)))
+        axis = [axis.pop(-2)] + axis
+        y = mx.sym.transpose(y.symbol, axes=axis)
+    else:
+        y = y.symbol
 
+    return KerasSymbol(mx.sym.dot(lhs=x.symbol, rhs=y))
+
+
+@keras_symbol_child
 def batch_dot(x, y, axes=None):
     """Batchwise dot product.
 
@@ -1253,8 +1297,33 @@ def batch_dot(x, y, axes=None):
         (32, 1, 30)
     ```
     """
-    raise NotImplementedError()
+    if ndim(x) == ndim(y) == 2:
+        assert axes is None or axes == 1 or tuple(axes) == (1, 1)
+        axes = (2, 1)
+        x = expand_dims(x, dim=1)
+        y = expand_dims(y, dim=2)
+        extra = True
+    else:
+        assert ndim(x) == ndim(y) == 3, "Only support 2d or 3d tensors for now"
+        extra = False
 
+    if isinstance(axes, Number):
+        axes = (axes, axes)
+    if axes is None:
+        Ta = Tb = False
+    else:
+        Ta = not bool(axes[0] - 1)
+        Tb = bool(axes[1] - 1)
+
+    ret = KerasSymbol(mx.sym.batch_dot(lhs=x.symbol, rhs=y.symbol,
+                                       transpose_a=Ta, transpose_b=Tb))
+    if extra:
+        ret = squeeze(ret, 2)
+
+    return ret
+
+
+@keras_symbol_child
 def transpose(x):
     """Transposes a tensor and returns it.
 
@@ -1287,8 +1356,11 @@ def transpose(x):
 
     ```
     """
-    raise NotImplementedError()
+    return KerasSymbol(
+        mx.sym.transpose(data=x.symbol))
 
+
+@keras_symbol_child
 def gather(reference, indices):
     """Retrieves the elements of indices `indices` in the tensor `reference`.
 
@@ -1299,11 +1371,12 @@ def gather(reference, indices):
     # Returns
         A tensor of same type as `reference`.
     """
-    raise NotImplementedError()
+    assert ndim(reference) == 2
+    indices = mx.sym.Cast(indices.symbol, dtype=reference.dtype)
+    return KerasSymbol(mx.sym.take(reference.symbol, indices))
+
 
 # ELEMENT-WISE OPERATIONS
-
-
 def max(x, axis=None, keepdims=False):
     """Maximum value in a tensor.
 
@@ -1318,7 +1391,9 @@ def max(x, axis=None, keepdims=False):
     # Returns
         A tensor with maximum values of `x`.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    return KerasSymbol(mx.sym.max(data=x.symbol, axis=axis, keepdims=keepdims))
+
 
 def min(x, axis=None, keepdims=False):
     """Minimum value in a tensor.
@@ -1334,8 +1409,11 @@ def min(x, axis=None, keepdims=False):
     # Returns
         A tensor with miminum values of `x`.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    return KerasSymbol(mx.sym.min(data=x.symbol, axis=axis, keepdims=keepdims))
 
+
+@keras_symbol_child
 def sum(x, axis=None, keepdims=False):
     """Sum of the values in a tensor, alongside the specified axis.
 
@@ -1350,8 +1428,11 @@ def sum(x, axis=None, keepdims=False):
     # Returns
         A tensor with sum of `x`.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    return KerasSymbol(mx.sym.sum(data=x.symbol, axis=axis, keepdims=keepdims))
 
+
+@keras_symbol_child
 def prod(x, axis=None, keepdims=False):
     """Multiplies the values in a tensor, alongside the specified axis.
 
@@ -1366,7 +1447,9 @@ def prod(x, axis=None, keepdims=False):
     # Returns
         A tensor with the product of elements of `x`.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    return KerasSymbol(mx.sym.prod(data=x.symbol, axis=axis, keepdims=keepdims))
+
 
 def cumsum(x, axis=0):
     """Cumulative sum of the values in a tensor, alongside the specified axis.
@@ -1392,6 +1475,8 @@ def cumprod(x, axis=0):
     """
     raise NotImplementedError()
 
+
+@keras_symbol_child
 def var(x, axis=None, keepdims=False):
     """Variance of a tensor, alongside the specified axis.
 
@@ -1406,8 +1491,15 @@ def var(x, axis=None, keepdims=False):
     # Returns
         A tensor with the variance of elements of `x`.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
 
+    v = _var(x, axis, keepdims)
+    return KerasSymbol(v)
+
+
+@keras_symbol_child
 def std(x, axis=None, keepdims=False):
     """Standard deviation of a tensor, alongside the specified axis.
 
@@ -1422,8 +1514,12 @@ def std(x, axis=None, keepdims=False):
     # Returns
         A tensor with the standard deviation of elements of `x`.
     """
-    raise NotImplementedError()
+    v = var(x, axis=axis, keepdims=keepdims)
+    ret = mx.sym.sqrt(data=v.symbol)
+    return KerasSymbol(ret)
 
+
+@keras_symbol_child
 def mean(x, axis=None, keepdims=False):
     """Mean of a tensor, alongside the specified axis.
 
@@ -1438,8 +1534,21 @@ def mean(x, axis=None, keepdims=False):
     # Returns
         A tensor with the mean of elements of `x`.
     """
-    raise NotImplementedError()
+    if axis == []:
+        return x
+    axis = _normalize_axis(axis, ndim(x))
 
+    if dtype(x) == 'uint8':
+        x = cast(x, floatx())
+
+    if axis is not None:
+        ret = mx.sym.mean(data=x.symbol, axis=axis, keepdims=keepdims)
+    else:
+        ret = mx.sym.mean(data=x.symbol, keepdims=keepdims)
+    return KerasSymbol(ret)
+
+
+@keras_symbol_child
 def any(x, axis=None, keepdims=False):
     """Bitwise reduction (logical OR).
 
@@ -1451,8 +1560,17 @@ def any(x, axis=None, keepdims=False):
     # Returns
         A uint8 tensor (0s and 1s).
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    sum0 = mx.sym.sum_axis(x, axis=axis, keepdims=keepdims)
+    # tmp = KerasSymbol(sum0)
+    # bg = mx.sym.broadcast_greater(lhs=sum0, rhs=0)
+    # bg_tmp = KerasSymbol()
+    return KerasSymbol(sum0 > 0)
 
+
+@keras_symbol_child
 def all(x, axis=None, keepdims=False):
     """Bitwise reduction (logical AND).
 
@@ -1464,8 +1582,15 @@ def all(x, axis=None, keepdims=False):
     # Returns
         A uint8 tensor (0s and 1s).
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    abs = mx.sym.abs(data=x)
+    min = mx.sym.min_axis(data=abs, axis=axis, keepdims=keepdims)
+    return KerasSymbol(min > 0)
 
+
+@keras_symbol_child
 def argmax(x, axis=-1):
     """Returns the index of the maximum value along an axis.
 
@@ -1476,8 +1601,12 @@ def argmax(x, axis=-1):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    ret = mx.sym.argmax(data=x.symbol, axis=axis)
+    return KerasSymbol(ret)
 
+
+@keras_symbol_child
 def argmin(x, axis=-1):
     """Returns the index of the minimum value along an axis.
 
@@ -1488,8 +1617,12 @@ def argmin(x, axis=-1):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    axis = _normalize_axis(axis, ndim(x))
+    ret = mx.sym.argmin(data=x.symbol, axis=axis)
+    return KerasSymbol(ret)
 
+
+@keras_symbol_child
 def square(x):
     """Element-wise square.
 
@@ -1499,8 +1632,10 @@ def square(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.square(data=x.symbol))
 
+
+@keras_symbol_child
 def abs(x):
     """Element-wise absolute value.
 
@@ -1510,8 +1645,10 @@ def abs(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.abs(data=x.symbol))
 
+
+@keras_symbol_child
 def sqrt(x):
     """Element-wise square root.
 
@@ -1521,8 +1658,12 @@ def sqrt(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    ret = mx.sym.Activation(data=x.symbol, act_type='relu')
+    ret = mx.sym.sqrt(data=ret)
+    return KerasSymbol(ret)
 
+
+@keras_symbol_child
 def exp(x):
     """Element-wise exponential.
 
@@ -1532,8 +1673,10 @@ def exp(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.exp(data=x.symbol))
 
+
+@keras_symbol_child
 def log(x):
     """Element-wise log.
 
@@ -1543,8 +1686,10 @@ def log(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.log(data=x.symbol))
 
+
+@keras_symbol_child
 def logsumexp(x, axis=None, keepdims=False):
     """Computes log(sum(exp(elements across dimensions of a tensor))).
 
@@ -1565,6 +1710,8 @@ def logsumexp(x, axis=None, keepdims=False):
     """
     raise NotImplementedError()
 
+
+@keras_symbol_child
 def round(x):
     """Element-wise rounding to the closest integer.
 
@@ -1576,8 +1723,10 @@ def round(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.round(data=x.symbol))
 
+
+@keras_symbol_child
 def sign(x):
     """Element-wise sign.
 
@@ -1587,8 +1736,10 @@ def sign(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.sign(data=x.symbol))
 
+
+@keras_symbol_child
 def pow(x, a):
     """Element-wise exponentiation.
 
@@ -1599,8 +1750,14 @@ def pow(x, a):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    if isinstance(a, KerasSymbol):
+        a = a.symbol
+    return KerasSymbol(mx.sym.pow(base=x, exp=a))
 
+
+@keras_symbol_child
 def clip(x, min_value, max_value):
     """Element-wise value clipping.
 
@@ -1612,8 +1769,16 @@ def clip(x, min_value, max_value):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if max_value is not None and max_value < min_value:
+        max_value = min_value
+    if max_value is None:
+        max_value = np.inf
+    min_value = np.float32(min_value)
+    max_value = np.nan_to_num(np.float32(max_value))
+    return KerasSymbol(mx.sym.clip(data=x.symbol, a_min=min_value, a_max=max_value))
 
+
+@keras_symbol_child
 def equal(x, y):
     """Element-wise equality between two tensors.
 
@@ -1624,8 +1789,19 @@ def equal(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x == y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_equal(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def not_equal(x, y):
     """Element-wise inequality between two tensors.
 
@@ -1636,8 +1812,19 @@ def not_equal(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x != y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_not_equal(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def greater(x, y):
     """Element-wise truth value of (x > y).
 
@@ -1648,8 +1835,19 @@ def greater(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x > y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_greater(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def greater_equal(x, y):
     """Element-wise truth value of (x >= y).
 
@@ -1660,8 +1858,19 @@ def greater_equal(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x >= y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_greater_equal(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def less(x, y):
     """Element-wise truth value of (x < y).
 
@@ -1672,8 +1881,19 @@ def less(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x < y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_lesser(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def less_equal(x, y):
     """Element-wise truth value of (x <= y).
 
@@ -1684,8 +1904,19 @@ def less_equal(x, y):
     # Returns
         A bool tensor.
     """
-    raise NotImplementedError()
+    scalar = False
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        scalar = True
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+        scalar = True
+    if scalar:
+        return KerasSymbol(mx.sym.Cast(x <= y, dtype='uint8'))
+    return KerasSymbol(mx.sym.Cast(mx.sym.broadcast_lesser_equal(lhs=x, rhs=y), dtype='uint8'))
 
+
+@keras_symbol_child
 def maximum(x, y):
     """Element-wise maximum of two tensors.
 
@@ -1696,8 +1927,14 @@ def maximum(x, y):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+    return KerasSymbol(mx.sym.maximum(left=x, right=y))
 
+
+@keras_symbol_child
 def minimum(x, y):
     """Element-wise minimum of two tensors.
 
@@ -1708,8 +1945,14 @@ def minimum(x, y):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    if isinstance(y, KerasSymbol):
+        y = y.symbol
+    return KerasSymbol(mx.sym.minimum(left=x, right=y))
 
+
+@keras_symbol_child
 def sin(x):
     """Computes sin of x element-wise.
 
@@ -1719,8 +1962,10 @@ def sin(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.sin(data=x.symbol))
 
+
+@keras_symbol_child
 def cos(x):
     """Computes cos of x element-wise.
 
@@ -1730,8 +1975,10 @@ def cos(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.cos(data=x.symbol))
 
+
+@keras_symbol_child
 def normalize_batch_in_training(x, gamma, beta,
                                 reduction_axes, epsilon=1e-3):
     """Computes mean and std for batch then apply batch_normalization on batch.
@@ -1747,8 +1994,44 @@ def normalize_batch_in_training(x, gamma, beta,
     # Returns
         A tuple length of 3, `(normalized_tensor, mean, variance)`.
     """
-    raise NotImplementedError()
+    original_x = x
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    if isinstance(beta, KerasSymbol):
+        beta = beta.symbol
+    if isinstance(gamma, KerasSymbol):
+        gamma = gamma.symbol
 
+    mean = mx.sym.mean(data=x, axis=reduction_axes, keepdims=False)
+    var = _var(x, axis=reduction_axes, keepdims=False)
+
+    list_axe = list(range(ndim(original_x))[:-1])
+    if sorted(reduction_axes) == list_axe:
+        normed = batch_normalization(x, mean, var,
+                                     beta, gamma,
+                                     epsilon)
+    else:
+        # need broadcasting
+        target_shape = []
+        for axis in range(ndim(original_x)):
+            if axis in reduction_axes:
+                target_shape.append(1)
+            else:
+                target_shape.append(original_x.shape[axis])
+        target_shape = tuple(target_shape)
+
+        broadcast_mean = mx.sym.Reshape(data=mean, shape=target_shape)
+        broadcast_var = mx.sym.Reshape(data=var, shape=target_shape)
+        broadcast_gamma = mx.sym.Reshape(data=gamma, shape=target_shape)
+        broadcast_beta = mx.sym.Reshape(data=beta, shape=target_shape)
+        normed = batch_normalization(x, broadcast_mean, broadcast_var,
+                                     broadcast_beta, broadcast_gamma,
+                                     epsilon)
+
+    return normed, KerasSymbol(mean), KerasSymbol(var)
+
+
+@keras_symbol_child
 def batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
     """Applies batch normalization on x given mean, var, beta and gamma.
 
@@ -1766,7 +2049,39 @@ def batch_normalization(x, mean, var, beta, gamma, epsilon=1e-3):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+    if isinstance(mean, KerasSymbol):
+        mean = mean.symbol
+    if isinstance(var, KerasSymbol):
+        var = var.symbol
+    if isinstance(beta, KerasSymbol):
+        beta = beta.symbol
+    if isinstance(gamma, KerasSymbol):
+        gamma = gamma.symbol
+
+    mean = mx.sym.stop_gradient(mean)
+    var = mx.sym.stop_gradient(var)
+
+    # gradient explode when learning gamma and beta at together.
+    gamma = mx.sym.stop_gradient(gamma)
+
+    std = mx.sym.sqrt(data=var + epsilon)
+
+    x = mx.sym.broadcast_minus(x, mean)
+    x = mx.sym.broadcast_div(x, std)
+    x = mx.sym.broadcast_mul(x, gamma)
+    x = mx.sym.broadcast_plus(x, beta)
+    return KerasSymbol(x)
+
+
+@keras_symbol_child
+def mxnet_batchnorm(x, gamma, beta, moving_mean, moving_var, axis=-1, epsilon=1e-3):
+    """Apply MXNet batch norm"""
+    return KerasSymbol(
+        mx.sym.BatchNorm(x.symbol, gamma.symbol, beta.symbol, moving_mean.symbol,
+                         moving_var.symbol, axis=axis, eps=epsilon))
+
 
 # SHAPE OPERATIONS
 
@@ -1932,6 +2247,8 @@ def batch_flatten(x):
     """
     raise NotImplementedError()
 
+
+@keras_symbol_child
 def expand_dims(x, axis=-1):
     """Adds a 1-sized dimension at index "axis".
 
@@ -1942,7 +2259,12 @@ def expand_dims(x, axis=-1):
     # Returns
         A tensor with expanded dimensions.
     """
-    raise NotImplementedError()
+    if axis < 0:
+        axis %= len(x.get_shape()) + 1
+    if isinstance(x, KerasSymbol):
+        shape = list(x.get_shape())
+        x = x.symbol
+        return KerasSymbol(mx.sym.expand_dims(x, axis=axis))
 
 def squeeze(x, axis):
     """Removes a 1-dimension from the tensor at index "axis".
@@ -2955,3 +3277,24 @@ def _convert_dtype_string(dtype):
     if dtype not in mapping:
         raise ValueError('MXNet Backend: Unsupported dtype:', dtype)
     return mapping[dtype]
+
+
+def _normalize_axis(axis, ndim):
+    if isinstance(axis, tuple):
+        axis = list(axis)
+    if isinstance(axis, list):
+        for i, a in enumerate(axis):
+            if a is not None and a < 0:
+                axis[i] = a % ndim
+    elif axis is None:
+        return ()
+    else:
+        if axis < 0:
+            axis = axis % ndim
+    return axis
+
+def _var(x, axis=None, keepdims=False):
+    mean_input = mx.sym.mean(data=x, axis=axis, keepdims=True)
+    centered_input = mx.sym.broadcast_minus(lhs=x, rhs=mean_input)
+    v = mx.sym.mean(data=(centered_input ** 2), axis=axis, keepdims=keepdims)
+    return v
