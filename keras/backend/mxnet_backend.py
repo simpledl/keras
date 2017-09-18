@@ -241,21 +241,33 @@ class KerasSymbol(object):
         return self.get_shape()
 
     def get_shape(self):
+        # TODO: SKM@. Was getting below error for tensor.dtype call.
+        # The truth value of an NDArray is ambiguous. Please convert to number with asscalar() first.
+        '''
         if hasattr(self, 'tensor') and self.tensor:
-            print("HIIO")
-            print(self.tensor)
             return self.tensor.shape
         else:
             _, out_shape, _ = self.symbol.infer_shape_partial()
             return out_shape[0]
+        '''
+        _, out_shape, _ = self.symbol.infer_shape_partial()
+        return out_shape[0]
 
     def get_type(self):
+        '''
+        # TODO: SKM@. Was getting below error for tensor.dtype call.
+        # The truth value of an NDArray is ambiguous. Please convert to number with asscalar() first.
+
         if hasattr(self, 'tensor') and self.tensor:
             return _convert_dtype_string(self.tensor.dtype)
         else:
             _, out_type, _ = self.symbol.infer_type()
             t = out_type[0]
             return _convert_dtype_string(t)
+        '''
+        _, out_type, _ = self.symbol.infer_type()
+        t = out_type[0]
+        return _convert_dtype_string(t)
 
     @keras_symbol_child
     def __getitem__(self, in_slice):
@@ -349,14 +361,14 @@ class KerasSymbol(object):
     def __rmul__(self, other):
         return self.__mul__(other)
 
-    # def __eq__(self, other):
-    #     if isinstance(other, Number):
-    #         return KerasSymbol(self.symbol == other)
-    #     else:
-    #         return KerasSymbolCompare(
-    #             mx.sym.broadcast_equal(
-    #                 lhs=self.symbol,
-    #                 rhs=other.symbol), self, other)
+    def __eq__(self, other):
+         if isinstance(other, Number):
+             return KerasSymbol(self.symbol == other)
+         else:
+             return KerasSymbolCompare(
+                 mx.sym.broadcast_equal(
+                     lhs=self.symbol,
+                     rhs=other.symbol), self, other)
 
     @keras_symbol_child
     def __gt__(self, other):
@@ -675,7 +687,10 @@ def int_shape(x):
     if hasattr(x, '_keras_shape'):
         return x._keras_shape
     try:
-        return tuple(x.get_shape().as_list())
+        if type(x.get_shape()) is tuple:
+            return x.get_shape()
+        else:
+            return tuple(x.get_shape().as_list())
     except ValueError:
         return None
 
