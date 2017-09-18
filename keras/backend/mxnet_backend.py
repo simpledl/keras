@@ -1364,11 +1364,14 @@ def transpose(x):
     ```python
         >>> inputs = K.placeholder((2, 3))
         >>> inputs
-        <tf.Tensor 'Placeholder_11:0' shape=(2, 3) dtype=float32>
+        placeholder1:[tensor=True dtype=float32]
+        >>> inputs.shape
+        (2,3)
         >>> input_transposed = K.transpose(inputs)
         >>> input_transposed
-        <tf.Tensor 'transpose_4:0' shape=(3, 2) dtype=float32>
-
+        transpose1:[tensor=True dtype=float32]
+        >>> input_transposed.shape
+        (3,2)
     ```
     """
     return KerasSymbol(
@@ -2099,7 +2102,7 @@ def mxnet_batchnorm(x, gamma, beta, moving_mean, moving_var, axis=-1, epsilon=1e
 
 
 # SHAPE OPERATIONS
-
+@keras_symbol_child
 def concatenate(tensors, axis=-1):
     """Concatenates a list of tensors alongside the specified axis.
 
@@ -2110,8 +2113,13 @@ def concatenate(tensors, axis=-1):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    if axis < 0:
+        axis += ndim(tensors[0])
+    tensors = [t.symbol for t in tensors]
+    return KerasSymbol(mx.sym.Concat(*tensors, dim=axis))
 
+
+@keras_symbol_child
 def reshape(x, shape):
     """Reshapes a tensor to the specified shape.
 
@@ -2122,8 +2130,10 @@ def reshape(x, shape):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.Reshape(data=x.symbol, shape=shape))
 
+
+@keras_symbol_child
 def permute_dimensions(x, pattern):
     """Permutes axes in a tensor.
 
@@ -2135,8 +2145,10 @@ def permute_dimensions(x, pattern):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.transpose(x.symbol, axes=pattern))
 
+
+@keras_symbol_child
 def resize_images(x, height_factor, width_factor, data_format):
     """Resizes the images contained in a 4D tensor.
 
@@ -2152,8 +2164,20 @@ def resize_images(x, height_factor, width_factor, data_format):
     # Raises
         ValueError: if `data_format` is neither `"channels_last"` or `"channels_first"`.
     """
-    raise NotImplementedError()
+    x = x.symbol
+    if data_format == 'channels_last':
+        x = mx.sym.repeat(x, repeats=height_factor, axis=1)
+        x = mx.sym.repeat(x, repeats=width_factor, axis=2)
+    elif data_format == 'channels_first':
+        x = mx.sym.repeat(x, repeats=height_factor, axis=2)
+        x = mx.sym.repeat(x, repeats=width_factor, axis=3)
+    else:
+        raise ValueError("MXNET Backend: Data format is neither channels_first or channels_last")
 
+    return KerasSymbol(x)
+
+
+@keras_symbol_child
 def resize_volumes(x, depth_factor, height_factor, width_factor, data_format):
     """Resizes the volume contained in a 5D tensor.
 
@@ -2170,8 +2194,22 @@ def resize_volumes(x, depth_factor, height_factor, width_factor, data_format):
     # Raises
         ValueError: if `data_format` is neither `"channels_last"` or `"channels_first"`.
     """
-    raise NotImplementedError()
+    x = x.symbol
+    if data_format == 'channels_last':
+        x = mx.sym.repeat(x, repeats=depth_factor, axis=1)
+        x = mx.sym.repeat(x, repeats=height_factor, axis=2)
+        x = mx.sym.repeat(x, repeats=width_factor, axis=3)
+    elif data_format == 'channels_first':
+        x = mx.sym.repeat(x, repeats=depth_factor, axis=2)
+        x = mx.sym.repeat(x, repeats=height_factor, axis=3)
+        x = mx.sym.repeat(x, repeats=width_factor, axis=4)
+    else:
+        raise ValueError("MXNET Backend: Data format is neither channels_first or channels_last")
 
+    return KerasSymbol(x)
+
+
+@keras_symbol_child
 def repeat_elements(x, rep, axis):
     """Repeats the elements of a tensor along an axis, like `np.repeat`.
 
@@ -2186,8 +2224,10 @@ def repeat_elements(x, rep, axis):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.repeat(x.symbol, repeats=rep, axis=axis))
 
+
+@keras_symbol_child
 def repeat(x, n):
     """Repeats a 2D tensor.
 
@@ -2201,8 +2241,12 @@ def repeat(x, n):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    x = mx.sym.expand_dims(x.symbol, axis=1)
+    x = mx.sym.repeat(x, repeats=n, axis=1)
+    return KerasSymbol(x)
 
+
+@keras_symbol_child
 def arange(start, stop=None, step=1, dtype='int32'):
     """Creates a 1D tensor containing a sequence of integers.
 
@@ -2223,8 +2267,11 @@ def arange(start, stop=None, step=1, dtype='int32'):
         An integer tensor.
 
     """
-    raise NotImplementedError()
+    dtype = np.dtype(dtype)
+    return KerasSymbol(mx.sym.arange(start=start, stop=stop, step=step, dtype=dtype))
 
+
+@keras_symbol_child
 def tile(x, n):
     """Creates a tensor by tiling `x` by `n`.
 
@@ -2236,8 +2283,10 @@ def tile(x, n):
     # Returns
         A tiled tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.tile(x.symbol, reps=n))
 
+
+@keras_symbol_child
 def flatten(x):
     """Flatten a tensor.
 
@@ -2247,8 +2296,10 @@ def flatten(x):
     # Returns
         A tensor, reshaped into 1-D
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.Reshape(data=x.symbol, shape=(-1,)))
 
+
+@keras_symbol_child
 def batch_flatten(x):
     """Turn a nD tensor into a 2D tensor with same 0th dimension.
 
@@ -2260,7 +2311,7 @@ def batch_flatten(x):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.Flatten(data=x.symbol))
 
 
 @keras_symbol_child
@@ -2277,10 +2328,11 @@ def expand_dims(x, axis=-1):
     if axis < 0:
         axis %= len(x.get_shape()) + 1
     if isinstance(x, KerasSymbol):
-        shape = list(x.get_shape())
         x = x.symbol
         return KerasSymbol(mx.sym.expand_dims(x, axis=axis))
 
+
+@keras_symbol_child
 def squeeze(x, axis):
     """Removes a 1-dimension from the tensor at index "axis".
 
@@ -2291,8 +2343,15 @@ def squeeze(x, axis):
     # Returns
         A tensor with the same data as `x` but reduced dimensions.
     """
-    raise NotImplementedError()
+    shape = list(x.get_shape())
+    assert shape.pop(axis) == 1, "Can only squeeze size 1 dimension"
 
+    if isinstance(x, KerasSymbol):
+        x = x.symbol
+        return KerasSymbol(mx.sym.Reshape(data=x, shape=tuple(shape)))
+
+
+@keras_symbol_child
 def temporal_padding(x, padding=(1, 1)):
     """Pads the middle dimension of a 3D tensor.
 
@@ -2304,7 +2363,8 @@ def temporal_padding(x, padding=(1, 1)):
     # Returns
         A padded 3D tensor.
     """
-    raise NotImplementedError()
+    return _asymmetric_temporal_padding(x, padding, padding)
+
 
 def spatial_2d_padding(x, padding=((1, 1), (1, 1)), data_format=None):
     """Pads the 2nd and 3rd dimensions of a 4D tensor.
@@ -3308,8 +3368,33 @@ def _normalize_axis(axis, ndim):
             axis = axis % ndim
     return axis
 
+
 def _var(x, axis=None, keepdims=False):
     mean_input = mx.sym.mean(data=x, axis=axis, keepdims=True)
     centered_input = mx.sym.broadcast_minus(lhs=x, rhs=mean_input)
     v = mx.sym.mean(data=(centered_input ** 2), axis=axis, keepdims=keepdims)
     return v
+
+
+@keras_symbol_child
+def _asymmetric_temporal_padding(x, left_pad=1, right_pad=1):
+    """Pad the middle dimension of a 3D tensor
+    with "left_pad" zeros left and "right_pad" right.
+
+    # Returns
+        A padded 3D tensor.
+    """
+    if ndim(x) == 3:
+        x_shape = x.shape
+        r1 = mx.sym.Reshape(x.symbol, shape=(x_shape[0], 1, x_shape[1], x_shape[2]))
+        tmp = KerasSymbol(r1)
+        pad = mx.sym.Pad(data=r1, mode='constant',
+                         constant_value=0,
+                         pad_width=(0, 0, 0, 0, left_pad, right_pad, 0, 0, ))
+        tmp2 = KerasSymbol(pad)
+        r2 = mx.sym.Reshape(pad, shape=(x_shape[0], x_shape[1] + left_pad + right_pad, x_shape[2]))
+        tmp3 = KerasSymbol(r2)
+        return KerasSymbol(r2)
+    return KerasSymbol(mx.sym.Pad(data=x.symbol, mode='constant',
+                                  constant_value=0,
+                                  pad_width=(0, 0, left_pad, right_pad, 0, 0)))
