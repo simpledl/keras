@@ -2565,6 +2565,36 @@ def print_tensor(x, message=''):
 
 
 # GRAPH MANIPULATION
+class Function(object):
+    def __init__(self, inputs, output, updates=[], **kwargs):
+        self.output = output
+        self.updates = updates
+        if isinstance(inputs[-1], Number):
+            self.is_train = inputs[-1]
+            self.inputs = inputs[:-1]
+        else:
+            self.inputs = inputs
+            self.is_train = _LEARNING_PHASE
+
+    def __call__(self, inputs):
+        ret_outputs = []
+        if isinstance(inputs[-1], Number):
+            self.is_train = inputs[-1]
+            inputs = inputs[:-1]
+        for x in self.output:
+            bind_values = dfs_get_bind_values(x)
+            data = {k.name: v for k, v in zip(self.inputs, inputs)}
+            data = dict(data, **bind_values)
+            args = x.symbol.list_arguments()
+            data_shapes = {k.name: v.shape for k, v in zip(self.inputs, inputs) if k.name in args}
+            executor = x.symbol.simple_bind(mx.cpu(), grad_req='null', **data_shapes)
+            for v in executor.arg_dict:
+                if v in data:
+                    executor.arg_dict[v][:] = data[v]
+            outputs = executor.forward(is_train=self.is_train)
+            ret_outputs.append(outputs[0].asnumpy())
+        return ret_outputs
+
 
 def function(inputs, outputs, updates=None, **kwargs):
     """Instantiates a Keras function.
@@ -2581,7 +2611,8 @@ def function(inputs, outputs, updates=None, **kwargs):
     # Raises
         ValueError: if invalid kwargs are passed in.
     """
-    raise NotImplementedError()
+    return Function(inputs, outputs, updates=updates, **kwargs)
+
 
 def gradients(loss, variables):
     """Returns the gradients of `variables` w.r.t. `loss`.
@@ -2595,6 +2626,8 @@ def gradients(loss, variables):
     """
     raise NotImplementedError()
 
+
+@keras_symbol_child
 def stop_gradient(variables):
     """Returns `variables` but with zero gradient w.r.t. every other variable.
 
@@ -2606,7 +2639,8 @@ def stop_gradient(variables):
         A single tensor or a list of tensors (depending on the passed argument)
             that has constant gradient with respect to any other variable.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.sym.BlockGrad(variables.symbol))
+
 
 # CONTROL FLOW
 
