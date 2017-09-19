@@ -2500,7 +2500,8 @@ def get_value(x):
     # Returns
         A Numpy array.
     """
-    raise NotImplementedError()
+    return eval(x)
+
 
 def batch_get_value(ops):
     """Returns the value of more than one tensor variable.
@@ -2511,7 +2512,8 @@ def batch_get_value(ops):
     # Returns
         A list of Numpy arrays.
     """
-    raise NotImplementedError()
+    return [get_value(op) for op in ops]
+
 
 def set_value(x, value):
     """Sets the value of a variable, from a Numpy array.
@@ -2521,7 +2523,10 @@ def set_value(x, value):
         value: Value to set the tensor to, as a Numpy array
             (of the same shape).
     """
-    raise NotImplementedError()
+    if isinstance(value, Number):
+        value = [value]
+    x.bind(mx.nd.array(value))
+
 
 def batch_set_value(tuples):
     """Sets the values of many tensor variables at once.
@@ -2530,7 +2535,9 @@ def batch_set_value(tuples):
         tuples: a list of tuples `(tensor, value)`.
             `value` should be a Numpy array.
     """
-    raise NotImplementedError()
+    for p, w in tuples:
+        set_value(p, w)
+
 
 def get_variable_shape(x):
     """Returns the shape of a variable.
@@ -2541,7 +2548,8 @@ def get_variable_shape(x):
     # Returns
         A tuple of integers.
     """
-    raise NotImplementedError()
+    return x.shape
+
 
 def print_tensor(x, message=''):
     """Prints `message` and the tensor value when evaluated.
@@ -2553,7 +2561,8 @@ def print_tensor(x, message=''):
     # Returns
         The same tensor `x`, unchanged.
     """
-    raise NotImplementedError()
+    print(message, eval(x))
+
 
 # GRAPH MANIPULATION
 
