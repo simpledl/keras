@@ -2366,6 +2366,7 @@ def temporal_padding(x, padding=(1, 1)):
     return _asymmetric_temporal_padding(x, padding, padding)
 
 
+@keras_symbol_child
 def spatial_2d_padding(x, padding=((1, 1), (1, 1)), data_format=None):
     """Pads the 2nd and 3rd dimensions of a 4D tensor.
 
@@ -2380,8 +2381,23 @@ def spatial_2d_padding(x, padding=((1, 1), (1, 1)), data_format=None):
     # Raises
         ValueError: if `data_format` is neither `"channels_last"` or `"channels_first"`.
     """
-    raise NotImplementedError()
+    if data_format == 'channels_first':
+        pattern = (0, 0, 0, 0,
+                   padding[0][0], padding[0][1], padding[1][0], padding[1][1])
+    elif data_format == 'channels_last':
+        # TODO: skm@ - MXNet supports this data_format for padding?
+        pattern = (0, 0,
+                   padding[0][0], padding[0][1], padding[1][0], padding[1][1],
+                   0, 0)
+    else:
+        raise ValueError("MXNET Backend: Data format is neither channels_first or channels_last")
 
+    return KerasSymbol(mx.sym.Pad(data=x.symbol, mode='constant',
+                                  constant_value=0,
+                                  pad_width=pattern))
+
+
+@keras_symbol_child
 def spatial_3d_padding(x, padding=((1, 1), (1, 1), (1, 1)), data_format=None):
     """Pads 5D tensor with zeros along the depth, height, width dimensions.
 
@@ -2405,7 +2421,29 @@ def spatial_3d_padding(x, padding=((1, 1), (1, 1), (1, 1)), data_format=None):
         ValueError: if `data_format` is neither `"channels_last"` or `"channels_first"`.
 
     """
-    raise NotImplementedError()
+    if data_format == 'channels_first':
+        pattern = (
+            0, 0,
+            0, 0,
+            padding[0][0], padding[0][1],
+            padding[1][0], padding[1][1],
+            padding[2][0], padding[2][1]
+        )
+    elif data_format == 'channels_last':
+        pattern = (
+            0, 0,
+            padding[0][0], padding[0][1],
+            padding[1][0], padding[1][1],
+            padding[2][0], padding[2][1],
+            0, 0
+        )
+    else:
+        raise ValueError("MXNET Backend: Data format is neither channels_first or channels_last")
+
+    return KerasSymbol(mx.sym.Pad(data=x.symbol, mode='constant',
+                                  constant_value=0,
+                                  pad_width=pattern))
+
 
 def stack(x, axis=0):
     """Stacks a list of rank `R` tensors into a rank `R+1` tensor.
@@ -2419,6 +2457,8 @@ def stack(x, axis=0):
     """
     raise NotImplementedError()
 
+
+@keras_symbol_child
 def one_hot(indices, num_classes):
     """Computes the one-hot representation of an integer tensor.
 
@@ -2431,8 +2471,10 @@ def one_hot(indices, num_classes):
         (n + 1)D one hot representation of the input
         with shape `(batch_size, dim1, dim2, ... dim(n-1), num_classes)`
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.symbol.one_hot(indices.symbol, depth=num_classes))
 
+
+@keras_symbol_child
 def reverse(x, axes):
     """Reverse a tensor along the specified axes.
 
@@ -2444,7 +2486,7 @@ def reverse(x, axes):
     # Returns
         A tensor.
     """
-    raise NotImplementedError()
+    return KerasSymbol(mx.symbol.reverse(data=x.symbol, axis=axes))
 
 # VALUE MANIPULATION
 
